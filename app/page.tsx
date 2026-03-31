@@ -103,8 +103,12 @@ export default function Home() {
 
   function handleIframeLoad() {
     iframeLoadCount.current += 1;
-    // First load is the initial form render — skip it
-    if (iframeLoadCount.current > 1) {
+    // Load 1 = initial form render (skip)
+    // Load 2 = form submission confirmation (trigger)
+    // Load 3 = "Submit another response" reload (skip)
+    // Load 4 = another submission (trigger)
+    // Pattern: only even-numbered loads are submissions
+    if (iframeLoadCount.current > 1 && iframeLoadCount.current % 2 === 0) {
       setStatus("waiting");
       setResult(null);
       // Wait 5s for n8n to process, then start polling
