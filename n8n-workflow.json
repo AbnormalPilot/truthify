@@ -1,4 +1,5 @@
 {
+  "name": "Truthify - Webhook Analysis",
   "nodes": [
     {
       "parameters": {
@@ -7,13 +8,13 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "88134e7f-6ed4-4dbf-bd89-c220ed386874",
+      "id": "webhook-trigger",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        -800,
-        -16
+        460,
+        300
       ],
       "webhookId": "truthify-analyze"
     },
@@ -41,26 +42,59 @@
         },
         "options": {}
       },
-      "id": "97bbafe6-c812-41bc-bf17-bb858fa3f8f7",
+      "id": "prepare-input",
       "name": "Prepare Input",
       "type": "n8n-nodes-base.set",
       "typeVersion": 2,
       "position": [
-        -576,
-        -16
+        700,
+        300
       ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a misinformation detection system. Your job is to determine whether the HEADLINE CLAIM is factually true or false.\n\nIMPORTANT RULES:\n- You are classifying whether the HEADLINE CLAIM is true in the real world.\n- verdict FAKE = the headline claim is false, fabricated, misleading, or not supported by evidence.\n- verdict REAL = the headline claim is factually accurate and supported by credible evidence.\n- verdict UNVERIFIABLE = not enough information to determine.\n- Do NOT evaluate whether the article text is well-written or whether it is a fact-check. Evaluate the HEADLINE CLAIM itself.\n- WhatsApp forwards, social media posts without sources, and unverified platforms should have LOW source credibility.\n- If the headline makes an extraordinary claim (e.g. currency overtaking another, miracle cures, celebrity deaths) with no credible source, lean toward FAKE.\n\nHeadline: {{$json[\"headline\"]}}\n\nContent:\n{{$json[\"content\"]}}\n\nSource URL: {{$json[\"source\"]}}\n\nReturn ONLY a valid JSON object (no markdown, no code fences, no explanation outside the JSON):\n{\n  \"verdict\": \"REAL\" or \"FAKE\" or \"UNVERIFIABLE\",\n  \"confidence_score\": <integer 0-100, how confident you are in your verdict>,\n  \"key_facts\": \"<2-4 sentences: what does the headline claim, and is it true or false based on known facts?>\",\n  \"emotional_tone\": \"<one of: neutral, slightly emotional, moderately emotional, highly emotional, fear-inducing, outrage-baiting>\",\n  \"manipulation_score\": <integer 0-100 representing how manipulative the language is>,\n  \"manipulation_tactics\": \"<comma-separated list like 'fear appeal', 'loaded language', 'false urgency', or 'none'>\",\n  \"bias_detected\": \"<describe any political, ideological, or framing bias, or 'none detected'>\",\n  \"logical_issues\": \"<list any logical fallacies, missing context, misleading statistics, or 'none detected'>\",\n  \"source_credibility\": \"<one of: high, medium, low, unknown — based on the URL domain or platform>\",\n  \"credibility_score\": <integer 0-100, how credible is the source>,\n  \"red_flags\": \"<comma-separated list of red flags like 'clickbait headline', 'anonymous sources', 'no date', 'WhatsApp forward', 'no credible source', or 'none'>\",\n  \"recommendation\": \"<one sentence advice for the reader>\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "gemini-analysis",
+      "name": "Gemini Analysis",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        940,
+        300
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "89FmqF1g3IIOQcdq",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
     },
     {
       "parameters": {
         "jsCode": "// Get original form data from Prepare Input node\nconst prep = $('Prepare Input').first().json;\nconst headline     = prep.headline     || 'Unknown';\nconst source       = prep.source       || '';\nconst articleText  = String(prep.content || '');\nconst submitted_at = prep.submitted_at || new Date().toISOString();\n\n// Get Gemini response\nconst gemini = $input.first().json;\nconst raw = gemini?.content?.parts?.[0]?.text\n  || gemini?.text\n  || gemini?.output\n  || gemini?.candidates?.[0]?.content?.parts?.[0]?.text\n  || '';\n\nlet parsed = {};\ntry {\n  const cleaned = raw.replace(/```json|```/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  parsed = {\n    verdict: 'UNVERIFIABLE',\n    confidence_score: 0,\n    key_facts: 'Could not parse AI response: ' + raw.substring(0, 200),\n    emotional_tone: 'unknown',\n    manipulation_score: 0,\n    manipulation_tactics: 'parse error',\n    bias_detected: 'parse error',\n    logical_issues: 'parse error',\n    source_credibility: 'unknown',\n    credibility_score: 0,\n    red_flags: 'ai_parse_error',\n    recommendation: 'Please re-submit the article for analysis.'\n  };\n}\n\nreturn [{\n  json: {\n    submitted_at,\n    headline,\n    source,\n    article_snippet:      articleText.substring(0, 300),\n    verdict:              parsed.verdict              || 'UNVERIFIABLE',\n    confidence_score:     parsed.confidence_score     ?? 0,\n    key_facts:            parsed.key_facts            || '',\n    logical_issues:       parsed.logical_issues       || 'none detected',\n    red_flags:            parsed.red_flags            || 'none',\n    recommendation:       parsed.recommendation       || '',\n    emotional_tone:       parsed.emotional_tone       || 'unknown',\n    manipulation_score:   parsed.manipulation_score   ?? 0,\n    manipulation_tactics: parsed.manipulation_tactics || 'none',\n    bias_detected:        parsed.bias_detected        || 'none detected',\n    source_credibility:   parsed.source_credibility   || 'unknown',\n    credibility_score:    parsed.credibility_score    ?? 0\n  }\n}];"
       },
-      "id": "b9537714-a26c-4d77-b59c-8dc20771700f",
+      "id": "format-response",
       "name": "Format Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        0,
-        -16
+        1180,
+        300
       ]
     },
     {
@@ -80,184 +114,23 @@
           "mappingMode": "autoMapInputData",
           "value": {},
           "matchingColumns": [],
-          "schema": [
-            {
-              "id": "submitted_at",
-              "displayName": "submitted_at",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "headline",
-              "displayName": "headline",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "source",
-              "displayName": "source",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "article_snippet",
-              "displayName": "article_snippet",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "verdict",
-              "displayName": "verdict",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "confidence_score",
-              "displayName": "confidence_score",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "key_facts",
-              "displayName": "key_facts",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "logical_issues",
-              "displayName": "logical_issues",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "red_flags",
-              "displayName": "red_flags",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "recommendation",
-              "displayName": "recommendation",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "emotional_tone",
-              "displayName": "emotional_tone",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "manipulation_score",
-              "displayName": "manipulation_score",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "manipulation_tactics",
-              "displayName": "manipulation_tactics",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "bias_detected",
-              "displayName": "bias_detected",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "source_credibility",
-              "displayName": "source_credibility",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            },
-            {
-              "id": "credibility_score",
-              "displayName": "credibility_score",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true,
-              "removed": false
-            }
-          ],
+          "schema": [],
           "attemptToConvertTypes": false,
           "convertFieldsToString": false
         },
         "options": {}
       },
-      "id": "fca620c3-2230-44d0-b56a-00e96468d05a",
+      "id": "save-analysis",
       "name": "Save Analysis",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
       "position": [
-        224,
-        80
+        1420,
+        460
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "xY1Ro8NPM5y8xwnO",
+          "id": "ule3HJ0my4tRVpq1",
           "name": "Google Sheets account"
         }
       }
@@ -268,53 +141,14 @@
         "responseBody": "={{ JSON.stringify($json) }}",
         "options": {}
       },
-      "id": "c8dbf5b9-f61f-47b3-895a-37c74ca39af1",
+      "id": "respond-webhook",
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        224,
-        -112
+        1420,
+        160
       ]
-    },
-    {
-      "parameters": {
-        "modelId": {
-          "__rl": true,
-          "value": "models/gemini-2.5-flash",
-          "mode": "list",
-          "cachedResultName": "models/gemini-2.5-flash"
-        },
-        "messages": {
-          "values": [
-            {
-              "content": "=You are a misinformation detection system. Your job is to determine whether the HEADLINE CLAIM is factually true or false.\n\n\n\nIMPORTANT RULES:\n- You are classifying whether the HEADLINE CLAIM is true in the real world.\n- verdict FAKE = the headline claim is false, fabricated, misleading, or not supported by evidence.\n- verdict REAL = the headline claim is factually accurate and supported by credible evidence.\n- verdict UNVERIFIABLE = not enough information to determine.\n- Do NOT evaluate whether the article text is well-written or whether it is a fact-check. Evaluate the HEADLINE CLAIM itself.\n- WhatsApp forwards, social media posts without sources, and unverified platforms should have LOW source credibility.\n- If the headline makes an extraordinary claim (e.g. currency overtaking another, miracle cures, celebrity deaths) with no credible source, lean toward FAKE.\n\nHeadline: {{$json[\"headline\"]}}\n\nContent:\n{{$json[\"content\"]}}\n\nSource URL: {{$json[\"source\"]}}\n\n\n\nReturn ONLY a valid JSON object (no markdown, no code fences, no explanation outside the JSON):\n{\n  \"verdict\": \"REAL\" or \"FAKE\" or \"UNVERIFIABLE\",\n  \"confidence_score\": <integer 0-100, how confident you are in your verdict>,\n  \"key_facts\": \"<2-4 sentences: what does the headline claim, and is it true or false based on known facts?>\",\n  \"emotional_tone\": \"<one of: neutral, slightly emotional, moderately emotional, highly emotional, fear-inducing, outrage-baiting>\",\n  \"manipulation_score\": <integer 0-100 representing how manipulative the language is>,\n  \"manipulation_tactics\": \"<comma-separated list like 'fear appeal', 'loaded language', 'false urgency', or 'none'>\",\n  \"bias_detected\": \"<describe any political, ideological, or framing bias, or 'none detected'>\",\n  \"logical_issues\": \"<list any logical fallacies, missing context, misleading statistics, or 'none detected'>\",\n  \"source_credibility\": \"<one of: high, medium, low, unknown — based on the URL domain or platform>\",\n  \"credibility_score\": <integer 0-100, how credible is the source>,\n  \"red_flags\": \"<comma-separated list of red flags like 'clickbait headline', 'anonymous sources', 'no date', 'WhatsApp forward', 'no credible source', or 'none'>\",\n  \"recommendation\": \"<one sentence advice for the reader>\"\n}"
-            }
-          ]
-        },
-        "builtInTools": {
-          "googleSearch": true,
-          "urlContext": true
-        },
-        "options": {
-          "temperature": 0.1,
-          "topP": 0.7
-        }
-      },
-      "id": "31c7bc8d-8a94-4153-a8e9-c6c31c34a9d1",
-      "name": "Gemini Analysis",
-      "type": "@n8n/n8n-nodes-langchain.googleGemini",
-      "typeVersion": 1.1,
-      "position": [
-        -352,
-        -16
-      ],
-      "credentials": {
-        "googlePalmApi": {
-          "id": "5VbWSVcvtIWmSDw2",
-          "name": "Google Gemini(PaLM) Api account"
-        }
-      }
     }
   ],
   "connections": {
@@ -340,6 +174,17 @@
         ]
       ]
     },
+    "Gemini Analysis": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Format Response": {
       "main": [
         [
@@ -355,22 +200,11 @@
           }
         ]
       ]
-    },
-    "Gemini Analysis": {
-      "main": [
-        [
-          {
-            "node": "Format Response",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
   },
   "pinData": {},
   "meta": {
     "templateCredsSetupCompleted": true,
-    "instanceId": "5a505cced692a8d30dfe4e52410fee889e8c98fbcdd6a2fac0df5b35bdc7ecdf"
+    "instanceId": "374e82387c391b955340a83f28e99030d6eee361987a2dd5e85d7d115fb9c2f4"
   }
 }
