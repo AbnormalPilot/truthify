@@ -1,10 +1,23 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
 interface AnalysisResult {
-  [key: string]: string;
+  verdict: string;
+  confidence_score: number;
+  key_facts: string;
+  emotional_tone: string;
+  manipulation_score: number;
+  manipulation_tactics: string;
+  bias_detected: string;
+  logical_issues: string;
+  source_credibility: string;
+  credibility_score: number;
+  red_flags: string;
+  recommendation: string;
+  headline: string;
+  source: string;
 }
 
 function getVerdictStyle(verdict: string) {
@@ -29,91 +42,52 @@ function getToneStyle(tone: string) {
 }
 
 export default function Home() {
+  const [headline, setHeadline] = useState("");
+  const [content, setContent] = useState("");
+  const [source, setSource] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [status, setStatus] = useState<"idle" | "waiting" | "polling" | "done" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
-  const iframeLoadCount = useRef(0);
-  const previousTotal = useRef<number | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
 
-  // Fetch the current row count on mount so we know when a new result appears
-  useEffect(() => {
-    fetch("/api/results")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.total != null) previousTotal.current = data.total;
-      })
-      .catch(() => {});
-  }, []);
+    if (!headline.trim() && !content.trim()) return;
 
-  useEffect(() => {
-    return () => stopPolling();
-  }, [stopPolling]);
-
-  function startPolling() {
-    setStatus("polling");
+    setStatus("loading");
+    setResult(null);
     setErrorMsg("");
-    stopPolling();
 
-    let attempts = 0;
-    const maxAttempts = 24; // 2 minutes at 5s intervals
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ headline, content, source }),
+      });
 
-    pollRef.current = setInterval(async () => {
-      attempts++;
-      try {
-        const res = await fetch("/api/results");
-        const data = await res.json();
+      const data = await res.json();
 
-        if (data.error) {
-          setErrorMsg(data.error);
-          setStatus("error");
-          stopPolling();
-          return;
-        }
-
-        // Check if we have a new row
-        const hasNewRow = previousTotal.current === null || data.total > previousTotal.current;
-
-        if (data.result && hasNewRow) {
-          previousTotal.current = data.total;
-          setResult(data.result);
-          setStatus("done");
-          stopPolling();
-        } else if (attempts >= maxAttempts) {
-          setErrorMsg("Analysis is taking longer than expected. Try refreshing the page.");
-          setStatus("error");
-          stopPolling();
-        }
-      } catch {
-        if (attempts >= maxAttempts) {
-          setErrorMsg("Failed to fetch results. Please refresh the page.");
-          setStatus("error");
-          stopPolling();
-        }
+      if (data.error) {
+        setErrorMsg(data.error);
+        setStatus("error");
+        return;
       }
-    }, 5000);
+
+      setResult(data);
+      setStatus("done");
+    } catch {
+      setErrorMsg("Failed to reach the analysis service. Please try again.");
+      setStatus("error");
+    }
   }
 
-  function handleIframeLoad() {
-    iframeLoadCount.current += 1;
-    // Load 1 = initial form render (skip)
-    // Load 2 = form submission confirmation (trigger)
-    // Load 3 = "Submit another response" reload (skip)
-    // Load 4 = another submission (trigger)
-    // Pattern: only even-numbered loads are submissions
-    if (iframeLoadCount.current > 1 && iframeLoadCount.current % 2 === 0) {
-      setStatus("waiting");
-      setResult(null);
-      // Wait 5s for n8n to process, then start polling
-      setTimeout(startPolling, 5000);
-    }
+  function handleReset() {
+    setHeadline("");
+    setContent("");
+    setSource("");
+    setResult(null);
+    setStatus("idle");
+    setErrorMsg("");
   }
 
   const confidence = Number(result?.confidence_score ?? 0);
@@ -126,31 +100,77 @@ export default function Home() {
         <h1 className="text-5xl font-black uppercase tracking-tighter">Truthify</h1>
       </header>
 
-      <section className="w-full max-w-2xl">
-        <div className="relative w-full aspect-[4/6] sm:aspect-[1/1] border-2 border-black bg-white overflow-hidden rounded-lg">
-          <iframe
-            src="https://docs.google.com/forms/d/e/1FAIpQLSfZbldHt1J-xauOGt48fyvLKrl1OoDPJWhllwBHQ27OJk7myw/viewform?embedded=true"
-            className="absolute inset-0 w-full h-full"
-            frameBorder="0"
-            marginHeight={0}
-            marginWidth={0}
-            onLoad={handleIframeLoad}
-          >
-            Loading...
-          </iframe>
-        </div>
-      </section>
+      {/* Form */}
+      {status !== "done" && (
+        <section className="w-full max-w-2xl">
+          <form onSubmit={handleSubmit} className="border-2 border-black rounded-lg bg-white overflow-hidden">
+            <div className="p-6 space-y-4">
+              <div>
+                <label htmlFor="headline" className="block text-xs font-bold uppercase tracking-widest opacity-60 mb-2">
+                  Article Title *
+                </label>
+                <input
+                  id="headline"
+                  type="text"
+                  value={headline}
+                  onChange={(e) => setHeadline(e.target.value)}
+                  placeholder="Enter the headline or claim to verify"
+                  className="w-full px-4 py-3 border-2 border-black/20 rounded-lg text-sm focus:border-black focus:outline-none transition-colors"
+                  required
+                  disabled={status === "loading"}
+                />
+              </div>
+              <div>
+                <label htmlFor="content" className="block text-xs font-bold uppercase tracking-widest opacity-60 mb-2">
+                  Article Content *
+                </label>
+                <textarea
+                  id="content"
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Paste the full article text here"
+                  rows={6}
+                  className="w-full px-4 py-3 border-2 border-black/20 rounded-lg text-sm focus:border-black focus:outline-none transition-colors resize-y"
+                  required
+                  disabled={status === "loading"}
+                />
+              </div>
+              <div>
+                <label htmlFor="source" className="block text-xs font-bold uppercase tracking-widest opacity-60 mb-2">
+                  Source URL (optional)
+                </label>
+                <input
+                  id="source"
+                  type="url"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                  placeholder="https://example.com/article"
+                  className="w-full px-4 py-3 border-2 border-black/20 rounded-lg text-sm focus:border-black focus:outline-none transition-colors"
+                  disabled={status === "loading"}
+                />
+              </div>
+            </div>
+            <div className="px-6 pb-6">
+              <button
+                type="submit"
+                disabled={status === "loading"}
+                className="w-full py-3 bg-black text-white font-bold uppercase tracking-widest text-sm rounded-lg hover:bg-black/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {status === "loading" ? "Analyzing..." : "Analyze Article"}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
-      {/* Loading States */}
-      {(status === "waiting" || status === "polling") && (
+      {/* Loading */}
+      {status === "loading" && (
         <section className="w-full max-w-2xl mt-8">
           <div className="border-2 border-black rounded-lg p-8 bg-white text-center">
             <div className="inline-block w-8 h-8 border-3 border-black border-t-transparent rounded-full animate-spin mb-4" />
-            <p className="font-bold text-lg">
-              {status === "waiting" ? "Processing your article..." : "Fetching analysis results..."}
-            </p>
+            <p className="font-bold text-lg">Analyzing your article...</p>
             <p className="text-sm opacity-50 mt-2">
-              This usually takes 15–30 seconds
+              This usually takes 5-15 seconds
             </p>
           </div>
         </section>
@@ -162,10 +182,10 @@ export default function Home() {
           <div className="border-2 border-red-200 rounded-lg p-6 bg-red-50 text-center">
             <p className="text-sm text-red-700">{errorMsg}</p>
             <button
-              onClick={startPolling}
-              className="mt-4 px-6 py-2 text-xs font-bold uppercase tracking-widest"
+              onClick={() => setStatus("idle")}
+              className="mt-4 px-6 py-2 text-xs font-bold uppercase tracking-widest border-2 border-red-300 rounded-lg hover:bg-red-100 transition-colors"
             >
-              Retry
+              Try Again
             </button>
           </div>
         </section>
@@ -173,7 +193,7 @@ export default function Home() {
 
       {/* Analysis Results */}
       {status === "done" && result && (
-        <section className="w-full max-w-2xl mt-8 mb-12">
+        <section className="w-full max-w-2xl mt-0 mb-12">
           <div className="border-2 border-black rounded-lg overflow-hidden bg-white">
             {/* Verdict */}
             <div className={`p-6 border-b-2 border-black ${getVerdictStyle(result.verdict)}`}>
@@ -281,6 +301,14 @@ export default function Home() {
               </p>
             </div>
           </div>
+
+          {/* Analyze Another */}
+          <button
+            onClick={handleReset}
+            className="w-full mt-4 py-3 border-2 border-black rounded-lg font-bold uppercase tracking-widest text-sm hover:bg-black hover:text-white transition-colors"
+          >
+            Analyze Another Article
+          </button>
         </section>
       )}
 
